@@ -17,6 +17,7 @@ const io = socketIO(server, {
 const PORT = process.env.PORT || 3000;
 
 const users = {};
+const uniqueIdMap = {}; // Map uniqueId -> socket
 let userCounter = 10; // Start from 10 for 2-digit IDs
 
 io.on('connection', (socket) => {
@@ -31,17 +32,28 @@ io.on('connection', (socket) => {
   // Send short ID to client
   socket.emit('short-id', shortId);
 
+  // Register unique ID
+  socket.on('register-unique-id', (data) => {
+    const uniqueId = data.uniqueId;
+    socket.uniqueId = uniqueId;
+    uniqueIdMap[uniqueId] = socket;
+    console.log('User', shortId, 'registered with unique ID:', uniqueId);
+  });
+
   socket.on('offer', (data) => {
     console.log('Offer received from', socket.shortId, 'to', data.targetUserId, 'isVideo:', data.isVideo);
-    const targetSocket = users[data.targetUserId];
+    
+    // Try to find by unique ID first, then by short ID
+    let targetSocket = uniqueIdMap[data.targetUserId] || users[data.targetUserId];
+    
     if (targetSocket) {
       // Track who is calling whom
       socket.callPartner = data.targetUserId;
-      targetSocket.callPartner = socket.shortId;
+      targetSocket.callPartner = socket.uniqueId || socket.shortId;
       
       targetSocket.emit('offer', {
         offer: data.offer,
-        callerId: socket.shortId,
+        callerId: socket.uniqueId || socket.shortId,
         isVideo: data.isVideo,
       });
     } else {
@@ -51,7 +63,8 @@ io.on('connection', (socket) => {
 
   socket.on('answer', (data) => {
     console.log('Answer received from', socket.shortId, 'to', data.targetUserId);
-    const targetSocket = users[data.targetUserId];
+    // Try to find by unique ID first, then by short ID
+    const targetSocket = uniqueIdMap[data.targetUserId] || users[data.targetUserId];
     if (targetSocket) {
       targetSocket.emit('answer', {
         answer: data.answer,
@@ -68,7 +81,8 @@ io.on('connection', (socket) => {
   socket.on('call-ended', (data) => {
     console.log('Call ended by', socket.shortId, 'with data:', data);
     if (socket.callPartner) {
-      const partnerSocket = users[socket.callPartner];
+      // Try to find by unique ID first, then by short ID
+      const partnerSocket = uniqueIdMap[socket.callPartner] || users[socket.callPartner];
       if (partnerSocket) {
         console.log('Notifying partner', socket.callPartner, 'that call ended');
         partnerSocket.emit('call-ended', {});
@@ -82,9 +96,13 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.shortId);
+    // Remove from uniqueIdMap
+    if (socket.uniqueId) {
+      delete uniqueIdMap[socket.uniqueId];
+    }
     // Notify call partner if in active call
     if (socket.callPartner) {
-      const partnerSocket = users[socket.callPartner];
+      const partnerSocket = uniqueIdMap[socket.callPartner] || users[socket.callPartner];
       if (partnerSocket) {
         console.log('Notifying', socket.callPartner, 'that user disconnected');
         partnerSocket.emit('call-ended');
