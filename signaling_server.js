@@ -75,6 +75,14 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('ice-candidate', data);
   });
 
+  // Chat messages
+  socket.on('chat-message', (data) => {
+    const targetSocket = uniqueIdMap[data.receiverId] || users[data.receiverId];
+    if (targetSocket) {
+      targetSocket.emit('chat-message', data);
+    }
+  });
+
   socket.on('call-ended', (data) => {
     if (socket.callPartner) {
       const partnerSocket = uniqueIdMap[socket.callPartner] || users[socket.callPartner];
